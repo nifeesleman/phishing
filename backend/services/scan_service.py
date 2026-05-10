@@ -26,6 +26,10 @@ class ScanService:
         self._persistence_executor = ThreadPoolExecutor(
             max_workers=max(1, int(self._config.get("SCAN_PERSIST_WORKERS", 2)))
         )
+        # Shared pool for parallel Supabase read requests (history, admin stats)
+        self._request_executor = ThreadPoolExecutor(
+            max_workers=max(4, int(self._config.get("SCAN_REQUEST_WORKERS", 4)))
+        )
 
     @property
     def _scans_table(self) -> str:
@@ -135,13 +139,19 @@ class ScanService:
             filters["url"] = f"ilike.*{quote(search)}*"
 
         try:
-            total = self._count_records(filters, user=user)
-            response = self._request(
-                "GET",
-                f"/rest/v1/{self._scans_table}",
-                params=self._build_history_params(filters, limit, offset, sort),
-                user=user,
+            count_future = self._request_executor.submit(
+                lambda: self._count_records(filters, user=user)
             )
+            data_future = self._request_executor.submit(
+                lambda: self._request(
+                    "GET",
+                    f"/rest/v1/{self._scans_table}",
+                    params=self._build_history_params(filters, limit, offset, sort),
+                    user=user,
+                )
+            )
+            total = count_future.result()
+            response = data_future.result()
             items = response if isinstance(response, list) else []
             return {
                 "items": [self._serialize_history_item(item) for item in items],
@@ -169,21 +179,41 @@ class ScanService:
         start = now - {"7d": timedelta(days=7), "30d": timedelta(days=30), "90d": timedelta(days=90)}[
             range_value
         ]
-        recent_rows = self._request(
-            "GET",
-            f"/rest/v1/{self._scans_table}",
-            params={
-                "select": "id,user_id,email,url,result,confidence_score,created_at",
-                "created_at": f"gte.{start.isoformat()}",
-                "order": "created_at.desc",
-                "limit": str(self._config["ADMIN_ANALYTICS_FETCH_LIMIT"]),
-            },
-        )
-        rows = recent_rows if isinstance(recent_rows, list) else []
-        serialized_rows = [self._serialize_history_item(row) for row in rows]
         range_filter = {"created_at": f"gte.{start.isoformat()}"}
-        phishing_count = self._count_records({**range_filter, "result": "eq.phishing"})
-        legit_count = self._count_records({**range_filter, "result": "eq.legitimate"})
+
+        # Fire all Supabase requests in parallel to avoid serial round-trips
+        recent_future = self._request_executor.submit(
+            lambda: self._request(
+                "GET",
+                f"/rest/v1/{self._scans_table}",
+                params={
+                    "select": "id,user_id,email,url,result,confidence_score,created_at",
+                    "created_at": f"gte.{start.isoformat()}",
+                    "order": "created_at.desc",
+                    "limit": str(self._config["ADMIN_ANALYTICS_FETCH_LIMIT"]),
+                },
+            )
+        )
+        phishing_future = self._request_executor.submit(
+            self._count_records, {**range_filter, "result": "eq.phishing"}
+        )
+        legit_future = self._request_executor.submit(
+            self._count_records, {**range_filter, "result": "eq.legitimate"}
+        )
+        total_future = self._request_executor.submit(self._count_records, range_filter)
+        auth_future = (
+            self._request_executor.submit(self._fetch_admin_auth_history)
+            if include_auth_history
+            else None
+        )
+
+        recent_rows_raw = recent_future.result()
+        phishing_count = phishing_future.result()
+        legit_count = legit_future.result()
+        total_scans = total_future.result()
+
+        rows = recent_rows_raw if isinstance(recent_rows_raw, list) else []
+        serialized_rows = [self._serialize_history_item(row) for row in rows]
 
         activity = defaultdict(lambda: {"total": 0, "phishing": 0, "legit": 0})
         top_urls: dict[str, dict] = {}
@@ -209,7 +239,7 @@ class ScanService:
         ]
         response = {
             "overview": {
-                "total_scans": self._count_records(range_filter),
+                "total_scans": total_scans,
                 "phishing_count": phishing_count,
                 "legit_count": legit_count,
                 "unique_users": len({row["user_id"] for row in serialized_rows if row.get("user_id")}),
@@ -224,8 +254,8 @@ class ScanService:
             "top_risky_urls": sorted(top_urls.values(), key=lambda item: (-item["count"], item["url"]))[:10],
             "recent_scans": serialized_rows[:20],
         }
-        if include_auth_history:
-            response["auth_history"] = self._fetch_admin_auth_history()
+        if auth_future is not None:
+            response["auth_history"] = auth_future.result()
         return response
 
     def user_is_admin(self, user_id: str) -> bool:

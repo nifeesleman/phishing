@@ -98,6 +98,10 @@ class PhishingModelService:
         self._artifact_bundle: dict[str, Any] | None = None
         self._vectorizer: Any | None = None
         self._input_mode: str | None = None
+        # Pre-sort once so _match_trusted_domain never re-sorts on every call
+        self._sorted_trusted_domains: list[str] = sorted(
+            config.get("TRUSTED_DOMAINS", []), key=len, reverse=True
+        )
 
     def predict(self, prepared_url: PreparedUrl) -> ModelPrediction:
         self._ensure_loaded()
@@ -183,8 +187,7 @@ class PhishingModelService:
         )
 
     def _match_trusted_domain(self, hostname: str) -> str | None:
-        trusted_domains = sorted(self._config.get("TRUSTED_DOMAINS", []), key=len, reverse=True)
-        for trusted_domain in trusted_domains:
+        for trusted_domain in self._sorted_trusted_domains:
             if hostname == trusted_domain or hostname.endswith(f".{trusted_domain}"):
                 return trusted_domain
         return None

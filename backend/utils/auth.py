@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import time
 from dataclasses import dataclass
 from functools import lru_cache
+from threading import Lock
 
 import jwt
 import requests
@@ -10,6 +13,49 @@ from jwt import InvalidTokenError, PyJWKClient
 from jwt.exceptions import PyJWKClientError
 
 from utils.errors import AuthenticationError, AuthorizationError, ConfigurationError
+
+# Thread-safe in-memory cache: token_hash -> (claims, monotonic_expiry)
+_token_claims_cache: dict[str, tuple[dict, float]] = {}
+_token_cache_lock = Lock()
+_MAX_TOKEN_CACHE_SIZE = 500
+_MAX_CACHE_TTL = 300.0  # cap at 5 minutes even if token is longer-lived
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _get_cached_claims(token: str) -> dict | None:
+    key = _token_hash(token)
+    now = time.monotonic()
+    with _token_cache_lock:
+        entry = _token_claims_cache.get(key)
+        if entry is not None:
+            claims, expiry = entry
+            if now < expiry:
+                return claims
+            del _token_claims_cache[key]
+    return None
+
+
+def _set_cached_claims(token: str, claims: dict) -> None:
+    exp = claims.get("exp")
+    if isinstance(exp, (int, float)):
+        ttl = max(0.0, float(exp) - time.time())
+    else:
+        ttl = _MAX_CACHE_TTL
+    ttl = min(ttl, _MAX_CACHE_TTL)
+    if ttl <= 0:
+        return
+
+    key = _token_hash(token)
+    now = time.monotonic()
+    with _token_cache_lock:
+        if len(_token_claims_cache) >= _MAX_TOKEN_CACHE_SIZE:
+            expired = [k for k, (_, ex) in _token_claims_cache.items() if ex <= now]
+            for k in expired:
+                del _token_claims_cache[k]
+        _token_claims_cache[key] = (claims, now + ttl)
 
 
 @dataclass(frozen=True)
@@ -60,6 +106,14 @@ class SupabaseJWTVerifier:
         return user
 
     def _decode_token(self, token: str) -> dict:
+        cached = _get_cached_claims(token)
+        if cached is not None:
+            return cached
+        claims = self._decode_token_uncached(token)
+        _set_cached_claims(token, claims)
+        return claims
+
+    def _decode_token_uncached(self, token: str) -> dict:
         issuer = self._config["SUPABASE_ISSUER"] or None
         audience = self._config["SUPABASE_JWT_AUDIENCE"] or None
         verify_audience = audience is not None
