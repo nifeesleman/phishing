@@ -24,6 +24,13 @@ export function getLoginErrorMessage(error: AuthErrorLike | null | undefined) {
   return message || "Sign in failed. Please try again.";
 }
 
+export function getCurrentPasswordErrorMessage(error: AuthErrorLike | null | undefined) {
+  const loginMessage = getLoginErrorMessage(error);
+  return loginMessage === "Incorrect email or password."
+    ? "Current password is incorrect."
+    : loginMessage;
+}
+
 export function getSignupErrorMessage(error: AuthErrorLike | null | undefined) {
   const message = error?.message?.trim();
   const normalizedMessage = message?.toLowerCase() ?? "";
@@ -41,4 +48,25 @@ export function getSignupErrorMessage(error: AuthErrorLike | null | undefined) {
   }
 
   return message || "Sign up failed. Please try again.";
+}
+
+export function getPasswordUpdateErrorMessage(error: AuthErrorLike | null | undefined) {
+  const message = error?.message?.trim();
+  const normalizedMessage = message?.toLowerCase() ?? "";
+
+  if (
+    normalizedMessage.includes("password should be at least 6 characters") ||
+    normalizedMessage.includes("password must be at least 6 characters")
+  ) {
+    return "Password must be at least 6 characters.";
+  }
+
+  if (
+    normalizedMessage.includes("new password should be different") ||
+    normalizedMessage.includes("same password")
+  ) {
+    return "Choose a different password than your current one.";
+  }
+
+  return message || "Password update failed. Please try again.";
 }

@@ -9,8 +9,8 @@ export function Header() {
   const { user, isAdmin, signOut } = useAuth();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const brandDestination = user ? getDefaultAuthenticatedPath(isAdmin) : "/";
-  const hideUserNavOnAdminPage = isAdmin && pathname === "/admin";
-  
+  const hideUserNavForAdmin = isAdmin && (pathname === "/admin" || pathname === "/settings");
+
   return (
     <header className="border-b border-border/60 bg-card/60">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4">
@@ -24,7 +24,7 @@ export function Header() {
         <nav className="flex items-center gap-2">
           {user ? (
             <>
-              {!hideUserNavOnAdminPage ? (
+              {!hideUserNavForAdmin ? (
                 <>
                   <Link
                     to="/dashboard"
@@ -50,6 +50,17 @@ export function Header() {
                   </Link>
                 </>
               ) : null}
+              <Link
+                to="/settings"
+                className={cn(
+                  buttonVariants({
+                    variant: pathname === "/settings" ? "secondary" : "ghost",
+                    size: "sm",
+                  }),
+                )}
+              >
+                Settings
+              </Link>
               {isAdmin ? (
                 <Link
                   to="/admin"

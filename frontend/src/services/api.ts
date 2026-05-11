@@ -90,7 +90,23 @@ export type AdminStatsResponse = AdminDirectoryResponse & {
   activity: AdminActivityItem[];
   topRiskyUrls: AdminRiskyUrl[];
   recentScans: HistoryItem[];
+  userHistories: Record<string, HistoryItem[]>;
 };
+
+export type AdminUserHistoryResponse = {
+  items: HistoryItem[];
+  total: number;
+};
+
+function normalizeUserHistories(value: unknown) {
+  const entries = asObject(value) ?? {};
+  return Object.fromEntries(
+    Object.entries(entries).map(([userId, history]) => [
+      userId,
+      Array.isArray(history) ? history.map(normalizeHistoryItem) : [],
+    ]),
+  );
+}
 
 type RequestOptions = {
   method?: "GET" | "POST";
@@ -308,6 +324,7 @@ export async function fetchAdminStats(range: AdminRange = "30d"): Promise<AdminS
   const activity = Array.isArray(record.activity) ? record.activity : [];
   const topRiskyUrls = Array.isArray(record.top_risky_urls) ? record.top_risky_urls : [];
   const recentScans = Array.isArray(record.recent_scans) ? record.recent_scans : [];
+  const userHistories = normalizeUserHistories(record.user_histories);
 
   return {
     range,
@@ -339,5 +356,17 @@ export async function fetchAdminStats(range: AdminRange = "30d"): Promise<AdminS
       } satisfies AdminRiskyUrl;
     }),
     recentScans: recentScans.map(normalizeHistoryItem),
+    userHistories,
+  };
+}
+
+export async function fetchAdminUserHistory(userId: string): Promise<AdminUserHistoryResponse> {
+  const payload = await request<unknown>(`/admin/users/${encodeURIComponent(userId)}/history`);
+  const record = asObject(payload) ?? {};
+  const items = Array.isArray(record.items) ? record.items : [];
+
+  return {
+    items: items.map(normalizeHistoryItem),
+    total: typeof record.total === "number" ? record.total : items.length,
   };
 }

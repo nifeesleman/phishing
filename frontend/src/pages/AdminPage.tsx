@@ -8,7 +8,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { fetchAdminStats, type AdminRange, type AdminStatsResponse } from "@/services/api";
+import {
+  fetchAdminStats,
+  fetchAdminUserHistory,
+  type AdminRange,
+  type AdminStatsResponse,
+  type AdminUserHistoryResponse,
+} from "@/services/api";
 
 const RANGE_OPTIONS: Array<{ value: AdminRange; label: string }> = [
   { value: "7d", label: "7 days" },
@@ -55,6 +61,12 @@ export function AdminPage() {
   const [adminData, setAdminData] = useState<AdminStatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [selectedUserError, setSelectedUserError] = useState<string | null>(null);
+  const [selectedUserLoadingId, setSelectedUserLoadingId] = useState<string | null>(null);
+  const [userHistoryById, setUserHistoryById] = useState<Record<string, AdminUserHistoryResponse>>(
+    {},
+  );
 
   const loadAdminData = useCallback(async (nextRange: AdminRange) => {
     setLoading(true);
@@ -79,7 +91,50 @@ export function AdminPage() {
   const activity = adminData?.activity ?? [];
   const topRiskyUrls = adminData?.topRiskyUrls ?? [];
   const recentScans = adminData?.recentScans ?? [];
+  const userHistories = adminData?.userHistories ?? {};
+  const selectedUser = users.find((entry) => entry.id === selectedUserId) ?? null;
+  const selectedUserFallbackScans = selectedUserId ? (userHistories[selectedUserId] ?? []) : [];
+  const selectedUserLoadedHistory = selectedUserId
+    ? (userHistoryById[selectedUserId] ?? null)
+    : null;
+  const selectedUserScans = selectedUserLoadedHistory?.items ?? selectedUserFallbackScans;
   const maxDailyTotal = activity.reduce((largest, item) => Math.max(largest, item.total), 0);
+  const selectedUserPhishingCount = selectedUserScans.filter(
+    (scan) => scan.result === "phishing",
+  ).length;
+  const selectedUserLegitCount = selectedUserScans.filter((scan) => scan.result === "legit").length;
+  const selectedUserTotalScans = selectedUserLoadedHistory?.total ?? selectedUserScans.length;
+
+  const loadSelectedUserHistory = useCallback(
+    async (userId: string | null) => {
+      if (!userId || userHistoryById[userId]) {
+        return;
+      }
+
+      setSelectedUserError(null);
+      setSelectedUserLoadingId(userId);
+
+      try {
+        const history = await fetchAdminUserHistory(userId);
+        setUserHistoryById((current) => ({ ...current, [userId]: history }));
+      } catch (requestError) {
+        if ((userHistories[userId] ?? []).length === 0) {
+          setSelectedUserError(
+            requestError instanceof Error
+              ? requestError.message
+              : "Failed to load user scan history.",
+          );
+        }
+      } finally {
+        setSelectedUserLoadingId((current) => (current === userId ? null : current));
+      }
+    },
+    [userHistories, userHistoryById],
+  );
+
+  useEffect(() => {
+    void loadSelectedUserHistory(selectedUserId);
+  }, [loadSelectedUserHistory, selectedUserId]);
 
   const heroStats = [
     {
@@ -378,7 +433,7 @@ export function AdminPage() {
                   <CardHeader>
                     <CardTitle>User access</CardTitle>
                     <CardDescription>
-                      Simple profiles with role, provider, and sign-in status.
+                      Click a user to see all recorded scans with phishing and legit results.
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-5">
@@ -386,22 +441,26 @@ export function AdminPage() {
                       <Badge variant="secondary" className="rounded-full">
                         {users.length} accounts
                       </Badge>
-                      <span>Admins and standard users in one simple view.</span>
+                      <span>Simple list for opening each user's scan history.</span>
                     </div>
 
-                    <ScrollArea className="h-[520px] pr-4">
-                      <div className="grid gap-4 lg:grid-cols-2">
-                        {users.length > 0 ? (
-                          users.map((user) => (
-                            <div
-                              key={user.id ?? user.email ?? "user-card"}
-                              className="rounded-2xl border border-border/60 bg-card/60 p-4 shadow-sm transition-colors hover:bg-card/80"
-                            >
-                              <div className="flex items-start gap-3">
-                                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-sm font-semibold text-primary">
-                                  {(user.email ?? user.id ?? "U").slice(0, 1).toUpperCase()}
-                                </div>
-                                <div className="min-w-0 flex-1 space-y-3">
+                    <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+                      <ScrollArea className="h-[520px] pr-4">
+                        <div className="space-y-3">
+                          {users.length > 0 ? (
+                            users.map((user) => {
+                              const isSelected = user.id === selectedUserId;
+                              return (
+                                <button
+                                  key={user.id ?? user.email ?? "user-card"}
+                                  type="button"
+                                  onClick={() => setSelectedUserId(user.id ?? null)}
+                                  className={`w-full rounded-2xl border p-4 text-left shadow-sm transition-colors ${
+                                    isSelected
+                                      ? "border-primary/50 bg-primary/5"
+                                      : "border-border/60 bg-card/60 hover:bg-card/80"
+                                  }`}
+                                >
                                   <div className="flex items-start justify-between gap-3">
                                     <div className="min-w-0">
                                       <p className="break-all font-semibold">
@@ -409,8 +468,8 @@ export function AdminPage() {
                                       </p>
                                       <p className="mt-1 text-sm text-muted-foreground">
                                         {user.lastSignInTimestamp
-                                          ? "Recently active"
-                                          : "No recent sign-in"}
+                                          ? `Last sign-in ${formatTimestamp(user.lastSignInTimestamp)}`
+                                          : "No sign-in activity yet"}
                                       </p>
                                     </div>
                                     <Badge
@@ -420,56 +479,91 @@ export function AdminPage() {
                                       {user.role}
                                     </Badge>
                                   </div>
+                                </button>
+                              );
+                            })
+                          ) : (
+                            <p className="text-sm text-muted-foreground">
+                              {loading ? "Loading users..." : "No user activity available."}
+                            </p>
+                          )}
+                        </div>
+                      </ScrollArea>
 
-                                  <div className="flex flex-wrap gap-2">
-                                    {(user.providers.length > 0 ? user.providers : ["email"]).map(
-                                      (provider) => (
-                                        <Badge
-                                          key={`${user.id ?? user.email}-${provider}`}
-                                          variant="outline"
-                                          className="rounded-full capitalize"
-                                        >
-                                          {provider}
-                                        </Badge>
-                                      ),
-                                    )}
-                                    <Badge
-                                      variant="outline"
-                                      className={
-                                        user.emailConfirmedTimestamp
-                                          ? "rounded-full border-emerald-500/30 text-emerald-700 dark:text-emerald-400"
-                                          : "rounded-full border-border/60 text-muted-foreground"
-                                      }
-                                    >
-                                      {user.emailConfirmedTimestamp ? "Verified" : "Pending"}
-                                    </Badge>
-                                  </div>
-
-                                  <div className="grid gap-3 rounded-xl bg-muted/30 p-3 text-sm sm:grid-cols-2">
-                                    <div>
-                                      <p className="text-xs text-muted-foreground">Signed up</p>
-                                      <p className="mt-1 font-medium">
-                                        {formatTimestamp(user.signupTimestamp)}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <p className="text-xs text-muted-foreground">Last sign-in</p>
-                                      <p className="mt-1 font-medium">
-                                        {formatTimestamp(user.lastSignInTimestamp)}
-                                      </p>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          ))
-                        ) : (
-                          <p className="text-sm text-muted-foreground">
-                            {loading ? "Loading users..." : "No user activity available."}
+                      <div className="rounded-2xl border border-border/60 bg-card/50">
+                        <div className="border-b border-border/60 p-5">
+                          <h3 className="text-lg font-semibold">User scans</h3>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            {selectedUser
+                              ? (selectedUser.email ?? selectedUser.id ?? "Selected user")
+                              : "Choose a user from the list to view scans."}
                           </p>
-                        )}
+                        </div>
+                        <div className="p-5">
+                          {!selectedUser ? (
+                            <p className="text-sm text-muted-foreground">
+                              Select a user to load all recorded scans.
+                            </p>
+                          ) : selectedUserError ? (
+                            <p className="text-sm text-destructive">{selectedUserError}</p>
+                          ) : (
+                            <div className="space-y-4">
+                              <div className="flex flex-wrap gap-2">
+                                <Badge variant="secondary" className="rounded-full">
+                                  {selectedUserTotalScans} scans
+                                </Badge>
+                                <Badge className="rounded-full border-destructive/20 bg-destructive/10 text-destructive">
+                                  {selectedUserPhishingCount} phishing
+                                </Badge>
+                                <Badge className="rounded-full border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+                                  {selectedUserLegitCount} legit
+                                </Badge>
+                              </div>
+
+                              <ScrollArea className="h-[420px] pr-4">
+                                <div className="space-y-3">
+                                  {selectedUserLoadingId === selectedUser.id &&
+                                  selectedUserScans.length === 0 ? (
+                                    <p className="text-sm text-muted-foreground">
+                                      Loading scans...
+                                    </p>
+                                  ) : selectedUserScans.length > 0 ? (
+                                    selectedUserScans.map((scan) => (
+                                      <div
+                                        key={
+                                          scan.id ??
+                                          `${scan.url}-${scan.created_at ?? scan.userId ?? "scan"}`
+                                        }
+                                        className="rounded-2xl border border-border/60 bg-card/60 p-4"
+                                      >
+                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                          <div className="min-w-0 flex-1">
+                                            <p className="break-all font-medium">{scan.url}</p>
+                                            <p className="mt-1 text-sm text-muted-foreground">
+                                              {formatTimestamp(scan.created_at)}
+                                            </p>
+                                          </div>
+                                          <Badge className={getVerdictClasses(scan.result)}>
+                                            {scan.result === "phishing" ? "Phishing" : "Legit"}
+                                          </Badge>
+                                        </div>
+                                        <div className="mt-4 text-sm text-muted-foreground">
+                                          Confidence: {formatConfidence(scan.confidence)}
+                                        </div>
+                                      </div>
+                                    ))
+                                  ) : (
+                                    <p className="text-sm text-muted-foreground">
+                                      No scans were found for this user.
+                                    </p>
+                                  )}
+                                </div>
+                              </ScrollArea>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </ScrollArea>
+                    </div>
                   </CardContent>
                 </Card>
               </TabsContent>

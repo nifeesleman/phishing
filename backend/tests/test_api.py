@@ -83,6 +83,31 @@ class FakeScanService:
             response["auth_history"] = [{"email": "admin@example.com", "is_admin": True}]
         return response
 
+    def get_admin_user_history(self, user_id):
+        return {
+            "items": [
+                {
+                    "id": "scan-1",
+                    "user_id": user_id,
+                    "user_email": "user@example.com",
+                    "url": "https://example.com/login",
+                    "result": "phishing",
+                    "confidence": 0.91,
+                    "created_at": "2025-01-01T00:00:00+00:00",
+                },
+                {
+                    "id": "scan-2",
+                    "user_id": user_id,
+                    "user_email": "user@example.com",
+                    "url": "https://example.com",
+                    "result": "legit",
+                    "confidence": 0.12,
+                    "created_at": "2025-01-02T00:00:00+00:00",
+                },
+            ],
+            "total": 2,
+        }
+
     def user_is_admin(self, user_id):
         return False
 
@@ -224,6 +249,33 @@ class ApiTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["auth_history"][0]["email"], "admin@example.com")
+
+    def test_admin_user_history_returns_records_for_admin(self):
+        self._inject_services(is_admin=True)
+        response = self.client.get(
+            "/admin/users/user-456/history", headers={"Authorization": "Bearer token"}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["total"], 2)
+        self.assertEqual(payload["items"][0]["user_id"], "user-456")
+
+    def test_admin_user_history_handles_preflight(self):
+        self._inject_services(is_admin=True)
+        response = self.client.open(
+            "/admin/users/user-456/history",
+            method="OPTIONS",
+            headers={
+                "Origin": "http://localhost:8080",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization,content-type",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("Access-Control-Allow-Origin"), "http://localhost:8080")
+        self.assertIn("GET", response.headers.get("Access-Control-Allow-Methods", ""))
 
     def test_signup_endpoint_creates_account(self):
         response = self.client.post(

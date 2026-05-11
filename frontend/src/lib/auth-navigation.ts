@@ -2,14 +2,21 @@ export function getDefaultAuthenticatedPath(isAdmin: boolean) {
   return isAdmin ? "/admin" : "/dashboard";
 }
 
-export function getSafeRedirectTarget(fallback = "/dashboard") {
-  if (typeof window === "undefined") return fallback;
+function isSafeRedirectTarget(redirect: string | null | undefined): redirect is string {
+  return Boolean(redirect && redirect.startsWith("/") && !redirect.startsWith("//"));
+}
+
+export function getRequestedRedirectTarget() {
+  if (typeof window === "undefined") return null;
 
   const redirect = new URLSearchParams(window.location.search).get("redirect");
+  return isSafeRedirectTarget(redirect) ? redirect : null;
+}
 
-  if (!redirect || !redirect.startsWith("/") || redirect.startsWith("//")) {
-    return fallback;
-  }
+export function getSafeRedirectTarget(fallback = "/dashboard") {
+  return getRequestedRedirectTarget() ?? fallback;
+}
 
-  return redirect;
+export function getAuthPagePath(path: string, redirectTarget = getRequestedRedirectTarget()) {
+  return redirectTarget ? `${path}?redirect=${encodeURIComponent(redirectTarget)}` : path;
 }

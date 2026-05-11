@@ -32,6 +32,31 @@ class _FailingScanService(ScanService):
 class _AdminStatsScanService(ScanService):
     def _request(self, method, path, **kwargs):
         if path == "/rest/v1/scans":
+            params = kwargs.get("params", {})
+            if params.get("user_id") == "eq.user-456":
+                limit = int(params.get("limit", "100"))
+                offset = int(params.get("offset", "0"))
+                rows = [
+                    {
+                        "id": "scan-1",
+                        "user_id": "user-456",
+                        "email": "user@example.com",
+                        "url": "https://example.com/login",
+                        "result": "phishing",
+                        "confidence_score": 0.91,
+                        "created_at": "2026-04-18T12:00:00+00:00",
+                    },
+                    {
+                        "id": "scan-2",
+                        "user_id": "user-456",
+                        "email": "user@example.com",
+                        "url": "https://example.com",
+                        "result": "legitimate",
+                        "confidence_score": 0.21,
+                        "created_at": "2026-04-18T10:00:00+00:00",
+                    },
+                ]
+                return rows[offset : offset + limit]
             return []
         if path == "/auth/v1/admin/users":
             return {
@@ -57,6 +82,8 @@ class _AdminStatsScanService(ScanService):
         raise AssertionError(f"Unexpected request path: {path}")
 
     def _count_records(self, extra_filters=None, *, user=None) -> int:
+        if extra_filters and extra_filters.get("user_id") == "eq.user-456":
+            return 2
         return 0
 
 
@@ -186,3 +213,21 @@ class ScanServiceTestCase(unittest.TestCase):
             result = service.get_admin_stats(range_value="30d", include_auth_history=False)
 
             self.assertNotIn("auth_history", result)
+
+    def test_admin_user_history_returns_all_matching_scans(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = _AdminStatsScanService(
+                {
+                    "ADMIN_ANALYTICS_FETCH_LIMIT": 50,
+                    "SUPABASE_SERVICE_ROLE_KEY": "service-role-key",
+                },
+                _FakeModelService(),
+                LocalHistoryStore(str(Path(temp_dir) / "history.sqlite")),
+            )
+
+            result = service.get_admin_user_history("user-456")
+
+            self.assertEqual(result["total"], 2)
+            self.assertEqual(len(result["items"]), 2)
+            self.assertEqual(result["items"][0]["result"], "phishing")
+            self.assertEqual(result["items"][1]["result"], "legit")

@@ -5,7 +5,11 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { getProfileRole } from "@/lib/profile-role";
-import { getDefaultAuthenticatedPath, getSafeRedirectTarget } from "@/lib/auth-navigation";
+import {
+  getAuthPagePath,
+  getDefaultAuthenticatedPath,
+  getSafeRedirectTarget,
+} from "@/lib/auth-navigation";
 import { getLoginErrorMessage } from "@/lib/auth-errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,12 +22,13 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const redirectTarget = getSafeRedirectTarget(getDefaultAuthenticatedPath(isAdmin));
 
   useEffect(() => {
     if (!authLoading && user && typeof window !== "undefined") {
-      window.location.replace(getDefaultAuthenticatedPath(isAdmin));
+      window.location.replace(redirectTarget);
     }
-  }, [authLoading, isAdmin, user]);
+  }, [authLoading, redirectTarget, user]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -112,7 +117,10 @@ export function LoginPage() {
         </form>
         <p className="mt-6 text-center text-sm text-muted-foreground">
           No account?{" "}
-          <Link to="/signup" className="font-medium text-primary hover:underline">
+          <Link
+            to={getAuthPagePath("/signup")}
+            className="font-medium text-primary hover:underline"
+          >
             Sign up
           </Link>
         </p>

@@ -1,10 +1,15 @@
 import { Link } from "@tanstack/react-router";
 import { Shield, Zap, History, ArrowRight, Check, Database, BarChart3 } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
+import { getAuthPagePath } from "@/lib/auth-navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Header } from "@/components/Header";
 
 export function LandingPage() {
+  const { user } = useAuth();
+  const dashboardDestination = user ? "/dashboard" : getAuthPagePath("/login", "/dashboard");
+
   return (
     <div className="min-h-screen bg-background">
       <Header />
@@ -113,7 +118,7 @@ export function LandingPage() {
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline">
-              <Link to="/dashboard">
+              <Link to={dashboardDestination}>
                 <Database className="mr-2 h-4 w-4" />
                 Open dashboard
               </Link>
@@ -146,7 +151,7 @@ export function LandingPage() {
               <Link to="/login" className="transition-colors hover:text-foreground">
                 Log in
               </Link>
-              <Link to="/dashboard" className="transition-colors hover:text-foreground">
+              <Link to={dashboardDestination} className="transition-colors hover:text-foreground">
                 Dashboard
               </Link>
             </div>

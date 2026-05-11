@@ -217,12 +217,16 @@ class ScanService:
 
         activity = defaultdict(lambda: {"total": 0, "phishing": 0, "legit": 0})
         top_urls: dict[str, dict] = {}
+        user_histories: dict[str, list[dict]] = defaultdict(list)
         for row in serialized_rows:
             created_at = row.get("created_at")
             if created_at:
                 day_key = created_at[:10]
                 activity[day_key]["total"] += 1
                 activity[day_key][row["result"]] += 1
+            user_id = row.get("user_id")
+            if user_id:
+                user_histories[str(user_id)].append(row)
             if row["result"] == "phishing":
                 current = top_urls.setdefault(
                     row["url"],
@@ -253,10 +257,39 @@ class ScanService:
             ],
             "top_risky_urls": sorted(top_urls.values(), key=lambda item: (-item["count"], item["url"]))[:10],
             "recent_scans": serialized_rows[:20],
+            "user_histories": dict(user_histories),
         }
         if auth_future is not None:
             response["auth_history"] = auth_future.result()
         return response
+
+    def get_admin_user_history(self, user_id: str) -> dict:
+        filters = {"user_id": f"eq.{user_id}"}
+        total = self._count_records(filters)
+        if total <= 0:
+            return {"items": [], "total": 0}
+
+        batch_size = 100
+        serialized_rows: list[dict] = []
+        offset = 0
+
+        while offset < total:
+            response = self._request(
+                "GET",
+                f"/rest/v1/{self._scans_table}",
+                params=self._build_history_params(filters, batch_size, offset, "newest"),
+            )
+            rows = response if isinstance(response, list) else []
+            if not rows:
+                break
+
+            serialized_rows.extend(self._serialize_history_item(row) for row in rows)
+            offset += len(rows)
+
+        return {
+            "items": serialized_rows,
+            "total": total,
+        }
 
     def user_is_admin(self, user_id: str) -> bool:
         response = self._request(

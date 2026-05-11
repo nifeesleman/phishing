@@ -4,7 +4,11 @@ import { Shield } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
-import { getDefaultAuthenticatedPath, getSafeRedirectTarget } from "@/lib/auth-navigation";
+import {
+  getAuthPagePath,
+  getDefaultAuthenticatedPath,
+  getSafeRedirectTarget,
+} from "@/lib/auth-navigation";
 import { getSignupErrorMessage } from "@/lib/auth-errors";
 import { getSignupValidationError } from "@/lib/signup-validation";
 import { Button } from "@/components/ui/button";
@@ -20,12 +24,13 @@ export function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmPasswordError, setConfirmPasswordError] = useState<string | null>(null);
+  const redirectTarget = getSafeRedirectTarget(getDefaultAuthenticatedPath(isAdmin));
 
   useEffect(() => {
     if (!authLoading && user && typeof window !== "undefined") {
-      window.location.replace(getDefaultAuthenticatedPath(isAdmin));
+      window.location.replace(redirectTarget);
     }
-  }, [authLoading, isAdmin, user]);
+  }, [authLoading, redirectTarget, user]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -62,7 +67,7 @@ export function SignupPage() {
       await supabase.auth.signOut();
     }
     toast.success("Account created. Please log in to continue.");
-    window.location.assign("/login");
+    window.location.assign(getAuthPagePath("/login"));
   }
 
   return (
@@ -139,7 +144,7 @@ export function SignupPage() {
         </form>
         <p className="mt-6 text-center text-sm text-muted-foreground">
           Already have an account?{" "}
-          <Link to="/login" className="font-medium text-primary hover:underline">
+          <Link to={getAuthPagePath("/login")} className="font-medium text-primary hover:underline">
             Log in
           </Link>
         </p>
