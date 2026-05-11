@@ -90,6 +90,7 @@ class ModelPrediction:
 
 class PhishingModelService:
     _FEATURE_EXTRACTION_FEATURE_COUNT = 30
+    _LOW_SIGNAL_PHISHING_CONFIDENCE_THRESHOLD = 0.75
 
     def __init__(self, config) -> None:
         self._config = config
@@ -127,6 +128,7 @@ class PhishingModelService:
             ),
             getattr(prepared_url, "hostname", ""),
         )
+        result = self._apply_low_signal_phishing_override(result)
         return self._apply_brand_impersonation_override(result)
 
     def _apply_trusted_domain_override(
@@ -135,30 +137,92 @@ class PhishingModelService:
         hostname: str,
     ) -> ModelPrediction:
         trusted_domain = self._match_trusted_domain(hostname)
-        if not trusted_domain:
-            return prediction
-
+        educational_domain = self._match_educational_domain(hostname)
         if prediction.api_result != "phishing":
             return prediction
 
-        updated_heuristics = dict(prediction.heuristics)
-        updated_heuristics["trusted_domain_override"] = trusted_domain
-        return ModelPrediction(
-            storage_result="legitimate",
-            api_result="legit",
-            confidence=0.99,
-            model_name=prediction.model_name,
-            model_version=prediction.model_version,
-            heuristics=updated_heuristics,
-        )
+        if trusted_domain:
+            updated_heuristics = dict(prediction.heuristics)
+            updated_heuristics["trusted_domain_override"] = trusted_domain
+            return ModelPrediction(
+                storage_result="legitimate",
+                api_result="legit",
+                confidence=0.99,
+                model_name=prediction.model_name,
+                model_version=prediction.model_version,
+                heuristics=updated_heuristics,
+            )
+
+        if educational_domain:
+            updated_heuristics = dict(prediction.heuristics)
+            updated_heuristics["educational_domain_override"] = educational_domain
+            return ModelPrediction(
+                storage_result="legitimate",
+                api_result="legit",
+                confidence=0.98,
+                model_name=prediction.model_name,
+                model_version=prediction.model_version,
+                heuristics=updated_heuristics,
+            )
+
+        return prediction
 
     def _build_prediction_heuristics(self, prepared_url: PreparedUrl) -> dict:
         hostname = getattr(prepared_url, "hostname", "")
         trusted_domain = self._match_trusted_domain(hostname) if hostname else None
+        educational_domain = self._match_educational_domain(hostname) if hostname else None
+        url_features = extract_features(prepared_url.normalized_url)
         return {
             **prepared_url.heuristics,
+            "url_length": int(url_features.get("url_length", 0)),
+            "uses_ip_address": bool(url_features.get("uses_ip_address", 0)),
+            "has_suspicious_tld": bool(url_features.get("has_suspicious_tld", 0)),
+            "abnormal_domain_structure": bool(url_features.get("abnormal_domain_structure", 0)),
+            "contains_encoded_chars": bool(url_features.get("contains_encoded_chars", 0)),
+            "contains_hex_pattern": bool(url_features.get("contains_hex_pattern", 0)),
             "trusted_domain": trusted_domain,
+            "educational_domain": educational_domain,
         }
+
+    def _apply_low_signal_phishing_override(self, prediction: ModelPrediction) -> ModelPrediction:
+        if prediction.api_result != "phishing":
+            return prediction
+
+        heuristics = prediction.heuristics
+        if heuristics.get("trusted_domain"):
+            return prediction
+        if prediction.confidence >= self._LOW_SIGNAL_PHISHING_CONFIDENCE_THRESHOLD:
+            return prediction
+        if heuristics.get("matched_brands") or heuristics.get("suspicious_terms"):
+            return prediction
+        if heuristics.get("uses_ip_address") or heuristics.get("has_suspicious_tld"):
+            return prediction
+        if heuristics.get("abnormal_domain_structure"):
+            return prediction
+        if heuristics.get("contains_encoded_chars") or heuristics.get("contains_hex_pattern"):
+            return prediction
+        if not heuristics.get("uses_https"):
+            return prediction
+        if int(heuristics.get("subdomain_depth", 0)) > 1:
+            return prediction
+        if int(heuristics.get("path_depth", 0)) > 1:
+            return prediction
+        if int(heuristics.get("url_length", 0)) > 96:
+            return prediction
+
+        updated_heuristics = dict(heuristics)
+        updated_heuristics["low_signal_override"] = {
+            "confidence_threshold": self._LOW_SIGNAL_PHISHING_CONFIDENCE_THRESHOLD,
+            "reason": "phishing prediction had low confidence and no phishing indicators",
+        }
+        return ModelPrediction(
+            storage_result="legitimate",
+            api_result="legit",
+            confidence=max(0.75, round(1 - prediction.confidence, 4)),
+            model_name=prediction.model_name,
+            model_version=prediction.model_version,
+            heuristics=updated_heuristics,
+        )
 
     def _apply_brand_impersonation_override(self, prediction: ModelPrediction) -> ModelPrediction:
         if prediction.api_result != "legit":
@@ -190,6 +254,17 @@ class PhishingModelService:
         for trusted_domain in self._sorted_trusted_domains:
             if hostname == trusted_domain or hostname.endswith(f".{trusted_domain}"):
                 return trusted_domain
+        return None
+
+    @staticmethod
+    def _match_educational_domain(hostname: str) -> str | None:
+        labels = [label for label in hostname.lower().split(".") if label]
+        if len(labels) < 2:
+            return None
+        if labels[-1] == "edu":
+            return "edu"
+        if len(labels) >= 3 and labels[-2] == "edu" and labels[-1].isalpha() and 2 <= len(labels[-1]) <= 3:
+            return ".".join(labels[-2:])
         return None
 
     def _ensure_loaded(self) -> None:
