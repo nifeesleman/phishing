@@ -50,7 +50,7 @@ function formatConfidence(value?: number | null) {
   return typeof value === "number" ? `${(value * 100).toFixed(1)}%` : "-";
 }
 
-function getVerdictClasses(result: "phishing" | "legit") {
+function getPerdictClasses(result: "phishing" | "legit") {
   return result === "phishing"
     ? "border-destructive/20 bg-destructive/10 text-destructive"
     : "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400";
@@ -405,7 +405,7 @@ export function AdminPage() {
                                     {scan.userEmail ?? scan.userId ?? "Unknown user"}
                                   </p>
                                 </div>
-                                <Badge className={getVerdictClasses(scan.result)}>
+                                <Badge className={getPerdictClasses(scan.result)}>
                                   {scan.result === "phishing" ? "Phishing" : "Legit"}
                                 </Badge>
                               </div>
@@ -543,7 +543,7 @@ export function AdminPage() {
                                               {formatTimestamp(scan.created_at)}
                                             </p>
                                           </div>
-                                          <Badge className={getVerdictClasses(scan.result)}>
+                                          <Badge className={getPerdictClasses(scan.result)}>
                                             {scan.result === "phishing" ? "Phishing" : "Legit"}
                                           </Badge>
                                         </div>

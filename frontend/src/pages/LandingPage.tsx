@@ -160,7 +160,7 @@ export function LandingPage() {
           <div>
             <h3 className="text-sm font-semibold text-foreground">Platform</h3>
             <div className="mt-4 space-y-2 text-sm text-muted-foreground">
-              <p>URL scanning and phishing verdicts</p>
+              <p>URL scanning and phishing Perdicts</p>
               <p>User scan history and exports</p>
               <p>Admin analytics and auth monitoring</p>
             </div>

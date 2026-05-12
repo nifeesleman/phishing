@@ -41,6 +41,14 @@ class FakeScanService:
         if str(raw_url).startswith("ftp://"):
             raise ValidationError("Only http and https URLs are supported")
         self.saved_payloads.append({"user_id": user.user_id, "url": raw_url, "persist_mode": persist_mode})
+        if str(raw_url) == "https://down.example.com":
+            return {
+                "result": "unavailable",
+                "confidence": None,
+                "model_name": None,
+                "model_version": None,
+                "message": "The website appears to be down or unreachable right now.",
+            }
         return {
             "result": "phishing",
             "confidence": 0.91,
@@ -175,10 +183,33 @@ class ApiTestCase(unittest.TestCase):
                 "confidence": 0.91,
                 "model_name": "GradientBoostingClassifier",
                 "model_version": "test-model",
+                "message": None,
             },
         )
         self.assertEqual(len(scan_service.saved_payloads), 1)
         self.assertEqual(scan_service.saved_payloads[0]["persist_mode"], "deferred")
+
+    def test_predict_endpoint_returns_unavailable_for_down_site(self):
+        self._inject_services()
+
+        response = self.client.post(
+            "/predict",
+            json={"url": "https://down.example.com"},
+            headers={"Authorization": "Bearer token"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.get_json(),
+            {
+                "prediction": "unavailable",
+                "result": "unavailable",
+                "confidence": None,
+                "model_name": None,
+                "model_version": None,
+                "message": "The website appears to be down or unreachable right now.",
+            },
+        )
 
     def test_predict_endpoint_handles_preflight(self):
         self._inject_services()

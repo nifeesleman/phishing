@@ -25,6 +25,9 @@ class _FakeModelService:
 
 
 class _FailingScanService(ScanService):
+    def _check_site_availability(self, prepared_url):
+        return type("AvailabilityStatusStub", (), {"is_available": True, "message": None})()
+
     def _save_scan(self, user, prepared_url, prediction, *, created_at) -> None:
         raise UpstreamServiceError("save failed")
 
@@ -93,9 +96,24 @@ class _DeferredPersistenceScanService(ScanService):
         self.persist_event = threading.Event()
         self.persisted_urls: list[str] = []
 
+    def _check_site_availability(self, prepared_url):
+        return type("AvailabilityStatusStub", (), {"is_available": True, "message": None})()
+
     def _save_scan(self, user, prepared_url, prediction, *, created_at) -> None:
         self.persisted_urls.append(prepared_url.original_url)
         self.persist_event.set()
+
+
+class _UnavailableScanService(ScanService):
+    def _check_site_availability(self, prepared_url):
+        return type(
+            "AvailabilityStatusStub",
+            (),
+            {
+                "is_available": False,
+                "message": "The website appears to be down or unreachable right now.",
+            },
+        )()
 
 
 class ScanServiceTestCase(unittest.TestCase):
@@ -231,3 +249,30 @@ class ScanServiceTestCase(unittest.TestCase):
             self.assertEqual(len(result["items"]), 2)
             self.assertEqual(result["items"][0]["result"], "phishing")
             self.assertEqual(result["items"][1]["result"], "legit")
+
+    def test_scan_returns_unavailable_when_site_is_down(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = _UnavailableScanService(
+                {
+                    "BRAND_KEYWORDS": {
+                        "paypal": "PayPal",
+                    }
+                },
+                _FakeModelService(),
+                LocalHistoryStore(str(Path(temp_dir) / "history.sqlite")),
+            )
+            user = AuthenticatedUser(
+                user_id="user-123",
+                email="user@example.com",
+                claims={"sub": "user-123"},
+                is_admin=False,
+                access_token="token",
+            )
+
+            result = service.scan_url(user, "https://example.com")
+            history = service.get_history(user, limit=10, offset=0)
+
+            self.assertEqual(result["result"], "unavailable")
+            self.assertIsNone(result["confidence"])
+            self.assertEqual(result["message"], "The website appears to be down or unreachable right now.")
+            self.assertEqual(history["total"], 0)

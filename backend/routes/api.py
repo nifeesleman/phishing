@@ -99,11 +99,12 @@ def predict_url():
     return (
         jsonify(
             {
-                "prediction": "phishing" if prediction == "phishing" else "safe",
+                "prediction": "phishing" if prediction == "phishing" else ("unavailable" if prediction == "unavailable" else "safe"),
                 "result": prediction,
                 "confidence": result.get("confidence"),
                 "model_name": result.get("model_name"),
                 "model_version": result.get("model_version"),
+                "message": result.get("message"),
             }
         ),
         200,

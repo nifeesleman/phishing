@@ -1,13 +1,14 @@
 import { supabase } from "@/integrations/supabase/client";
 
-export type Prediction = "phishing" | "safe";
+export type Prediction = "phishing" | "safe" | "unavailable";
 
 export type PredictionResponse = {
   prediction: Prediction;
-  result: "phishing" | "legit";
+  result: "phishing" | "legit" | "unavailable";
   confidence: number | null;
   modelName: string | null;
   modelVersion: string | null;
+  message: string | null;
 };
 
 export type HistorySort = "newest" | "oldest" | "confidence_desc" | "confidence_asc";
@@ -158,7 +159,9 @@ function toStringArray(value: unknown) {
 }
 
 function toPrediction(value: unknown): Prediction {
-  return value === "phishing" ? "phishing" : "safe";
+  if (value === "phishing") return "phishing";
+  if (value === "unavailable") return "unavailable";
+  return "safe";
 }
 
 function normalizeHistoryItem(value: unknown): HistoryItem {
@@ -278,10 +281,16 @@ export async function predictUrl(url: string) {
 
   return {
     prediction: toPrediction(record.prediction),
-    result: record.result === "phishing" ? "phishing" : "legit",
+    result:
+      record.result === "phishing"
+        ? "phishing"
+        : record.result === "unavailable"
+          ? "unavailable"
+          : "legit",
     confidence: typeof record.confidence === "number" ? record.confidence : null,
     modelName: toString(record.model_name) || null,
     modelVersion: toString(record.model_version) || null,
+    message: toString(record.message) || null,
   } satisfies PredictionResponse;
 }
 

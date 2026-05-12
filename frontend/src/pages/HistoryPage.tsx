@@ -82,7 +82,7 @@ export function HistoryPage() {
               <div>
                 <h1 className="text-3xl font-bold tracking-tight">History</h1>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Review the URLs you scanned and the verdicts returned by the backend.
+                  Review the URLs you scanned and the Perdicts returned by the backend.
                 </p>
               </div>
               <Button variant="outline" onClick={() => void loadHistory()} disabled={loading}>
@@ -180,7 +180,7 @@ export function HistoryPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>URL</TableHead>
-                      <TableHead>Verdict</TableHead>
+                      <TableHead>Perdict</TableHead>
                       <TableHead>Confidence</TableHead>
                       <TableHead>Scanned at</TableHead>
                     </TableRow>

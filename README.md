@@ -85,7 +85,7 @@ PhishGuard is a full-stack phishing detection platform that combines a Flask-bas
 
 ## Overview
 
-PhishGuard is designed to support phishing awareness and URL risk assessment in a modern web application. The platform accepts a URL from an authenticated user, applies the backend detection pipeline, returns a verdict with confidence data, and stores the result for later review. If cloud persistence is temporarily unavailable, the backend can fall back to a local SQLite history store to avoid losing scan data.
+PhishGuard is designed to support phishing awareness and URL risk assessment in a modern web application. The platform accepts a URL from an authenticated user, applies the backend detection pipeline, returns a Perdict with confidence data, and stores the result for later review. If cloud persistence is temporarily unavailable, the backend can fall back to a local SQLite history store to avoid losing scan data.
 
 The repository contains:
 
@@ -101,7 +101,7 @@ The repository contains:
 
 - Account registration through the backend signup endpoint and Supabase Auth
 - Secure sign-in and authenticated API requests
-- URL scanning with phishing or legitimate verdicts
+- URL scanning with phishing or legitimate Perdicts
 - Confidence scores and model metadata in scan results
 - Personal history view with search, filtering, sorting, pagination, and export
 
@@ -127,7 +127,7 @@ The repository contains:
 1. The frontend authenticates users with Supabase.
 2. The frontend sends the access token with scan and history requests.
 3. The Flask API verifies the JWT and validates the request payload.
-4. The backend runs the phishing detection pipeline and produces a verdict.
+4. The backend runs the phishing detection pipeline and produces a Perdict.
 5. The result is stored in Supabase when available, or in local SQLite as a fallback.
 6. The frontend renders scan results, history, and admin analytics.
 

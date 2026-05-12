@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 import logging
 from collections import defaultdict
 from collections.abc import Mapping
@@ -16,6 +17,12 @@ from utils.errors import ConfigurationError, UpstreamServiceError
 from utils.url_processing import PreparedUrl, prepare_url
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AvailabilityStatus:
+    is_available: bool
+    message: str | None = None
 
 
 class ScanService:
@@ -37,6 +44,15 @@ class ScanService:
 
     def scan_url(self, user: AuthenticatedUser, raw_url: str, *, persist_mode: str = "blocking") -> dict:
         prepared_url = prepare_url(raw_url, self._config["BRAND_KEYWORDS"])
+        availability = self._check_site_availability(prepared_url)
+        if not availability.is_available:
+            return {
+                "result": "unavailable",
+                "confidence": None,
+                "model_name": None,
+                "model_version": None,
+                "message": availability.message or "The website appears to be unavailable right now.",
+            }
         prediction = self._model_service.predict(prepared_url)
         created_at = datetime.now(UTC).isoformat()
         response = {
@@ -121,6 +137,38 @@ class ScanService:
         )
         if warning:
             logger.warning(warning)
+
+    def _check_site_availability(self, prepared_url: PreparedUrl) -> AvailabilityStatus:
+        try:
+            response = requests.get(
+                prepared_url.normalized_url,
+                allow_redirects=True,
+                timeout=float(self._config.get("SITE_AVAILABILITY_TIMEOUT_SECONDS", 5)),
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    )
+                },
+                stream=True,
+            )
+        except requests.RequestException as exc:
+            logger.info("Site availability check failed for %s: %s", prepared_url.normalized_url, exc)
+            return AvailabilityStatus(
+                is_available=False,
+                message="The website appears to be down or unreachable right now.",
+            )
+        finally:
+            if "response" in locals():
+                response.close()
+
+        if response.status_code >= 500:
+            return AvailabilityStatus(
+                is_available=False,
+                message="The website appears to be down right now.",
+            )
+        return AvailabilityStatus(is_available=True)
 
     def get_history(
         self,

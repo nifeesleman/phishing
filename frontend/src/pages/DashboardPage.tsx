@@ -79,13 +79,15 @@ export function DashboardPage() {
               <Card>
                 <CardHeader>
                   <CardTitle>Prediction result</CardTitle>
-                  <CardDescription>The backend returns the verdict and confidence score.</CardDescription>
+                  <CardDescription>The backend returns the Perdict and confidence score.</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="rounded-lg border border-border/60 bg-card p-4">
-                      <p className="text-sm text-muted-foreground">Verdict</p>
-                      <p className="mt-2 text-2xl font-semibold capitalize">{result.prediction}</p>
+                      <p className="text-sm text-muted-foreground">Perdict</p>
+                      <p className="mt-2 text-2xl font-semibold capitalize">
+                        {result.prediction === "unavailable" ? "Site unavailable" : result.prediction}
+                      </p>
                     </div>
                     <div className="rounded-lg border border-border/60 bg-card p-4">
                       <p className="text-sm text-muted-foreground">Confidence</p>
@@ -94,6 +96,9 @@ export function DashboardPage() {
                       </p>
                     </div>
                   </div>
+                  {result.message ? (
+                    <p className="mt-4 text-sm text-muted-foreground">{result.message}</p>
+                  ) : null}
                 </CardContent>
               </Card>
             ) : null}
