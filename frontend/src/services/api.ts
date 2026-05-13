@@ -140,7 +140,9 @@ export class ApiError extends Error {
 function getApiBaseUrl() {
   const rawBaseUrl =
     import.meta.env.VITE_API_BASE_URL ||
+    import.meta.env.VITE_API_URL ||
     import.meta.env.VITE_FLASK_API_BASE_URL ||
+    process.env.API_URL ||
     process.env.API_BASE_URL ||
     process.env.FLASK_API_BASE_URL;
 
@@ -153,7 +155,10 @@ function getApiBaseUrl() {
     return `${protocol}//${hostname}:5000`;
   }
 
-  throw new ApiError("Missing backend URL. Set VITE_API_BASE_URL to your Flask API base URL.", 500);
+  throw new ApiError(
+    "Missing backend URL. Set VITE_API_BASE_URL or VITE_API_URL to your Flask API base URL.",
+    500,
+  );
 }
 
 function asObject(value: unknown) {
