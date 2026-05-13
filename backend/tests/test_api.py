@@ -116,6 +116,24 @@ class FakeScanService:
             "total": 2,
         }
 
+    def cleanup_inactive_auth_users(self):
+        return {
+            "cutoff_timestamp": "2025-11-13T00:00:00+00:00",
+            "deleted_count": 1,
+            "failed_count": 0,
+            "deleted_users": [
+                {
+                    "id": "user-456",
+                    "email": "user@example.com",
+                    "signup_timestamp": "2025-01-01T00:00:00+00:00",
+                    "last_sign_in_timestamp": None,
+                    "is_admin": False,
+                    "providers": ["email"],
+                }
+            ],
+            "failed_users": [],
+        }
+
     def user_is_admin(self, user_id):
         return False
 
@@ -307,6 +325,17 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers.get("Access-Control-Allow-Origin"), "http://localhost:8080")
         self.assertIn("GET", response.headers.get("Access-Control-Allow-Methods", ""))
+
+    def test_admin_cleanup_inactive_users_returns_summary_for_admin(self):
+        self._inject_services(is_admin=True)
+        response = self.client.post(
+            "/admin/users/cleanup-inactive", headers={"Authorization": "Bearer token"}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["deleted_count"], 1)
+        self.assertEqual(payload["deleted_users"][0]["email"], "user@example.com")
 
     def test_signup_endpoint_creates_account(self):
         response = self.client.post(

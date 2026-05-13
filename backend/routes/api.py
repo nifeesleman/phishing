@@ -163,3 +163,15 @@ def admin_user_history(user_id: str):
         raise AuthorizationError("Admin privileges are required")
 
     return jsonify(scan_service.get_admin_user_history(user_id))
+
+
+@api_blueprint.post("/admin/users/cleanup-inactive")
+def admin_cleanup_inactive_users():
+    user = get_jwt_verifier().require_user()
+    scan_service = _get_scan_service()
+    if not user.is_admin and not scan_service.user_is_admin(user.user_id):
+        from utils.errors import AuthorizationError
+
+        raise AuthorizationError("Admin privileges are required")
+
+    return jsonify(scan_service.cleanup_inactive_auth_users())

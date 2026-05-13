@@ -63,6 +63,18 @@ export type AdminDirectoryResponse = {
   };
 };
 
+export type AdminInactiveCleanupFailure = AdminUser & {
+  message: string;
+};
+
+export type AdminInactiveCleanupResponse = {
+  cutoffTimestamp?: string;
+  deletedCount: number;
+  failedCount: number;
+  deletedUsers: AdminUser[];
+  failedUsers: AdminInactiveCleanupFailure[];
+};
+
 export type AdminOverview = {
   totalScans: number;
   phishingCount: number;
@@ -209,6 +221,14 @@ function summarizeAdminUsers(users: AdminUser[]) {
     standardUsers: users.length - adminUsers,
     mostRecentSignIn,
   };
+}
+
+function normalizeAdminCleanupFailure(value: unknown): AdminInactiveCleanupFailure {
+  const entry = asObject(value) ?? {};
+  return {
+    ...normalizeAdminUser(entry),
+    message: toString(entry.message) || "Cleanup failed.",
+  } satisfies AdminInactiveCleanupFailure;
 }
 
 async function getAccessToken() {
@@ -366,6 +386,23 @@ export async function fetchAdminStats(range: AdminRange = "30d"): Promise<AdminS
     }),
     recentScans: recentScans.map(normalizeHistoryItem),
     userHistories,
+  };
+}
+
+export async function fetchAdminInactiveCleanup(): Promise<AdminInactiveCleanupResponse> {
+  const payload = await request<unknown>("/admin/users/cleanup-inactive", {
+    method: "POST",
+  });
+  const record = asObject(payload) ?? {};
+  const deletedUsers = Array.isArray(record.deleted_users) ? record.deleted_users : [];
+  const failedUsers = Array.isArray(record.failed_users) ? record.failed_users : [];
+
+  return {
+    cutoffTimestamp: toString(record.cutoff_timestamp) || undefined,
+    deletedCount: typeof record.deleted_count === "number" ? record.deleted_count : 0,
+    failedCount: typeof record.failed_count === "number" ? record.failed_count : 0,
+    deletedUsers: deletedUsers.map(normalizeAdminUser),
+    failedUsers: failedUsers.map(normalizeAdminCleanupFailure),
   };
 }
 

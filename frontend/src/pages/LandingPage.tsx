@@ -154,6 +154,12 @@ export function LandingPage() {
               <Link to={dashboardDestination} className="transition-colors hover:text-foreground">
                 Dashboard
               </Link>
+              <Link to="/privacy" className="transition-colors hover:text-foreground">
+                Privacy Policy
+              </Link>
+              <Link to="/terms" className="transition-colors hover:text-foreground">
+                Terms of Service
+              </Link>
             </div>
           </div>
 

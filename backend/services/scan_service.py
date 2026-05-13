@@ -1,4 +1,5 @@
 from __future__ import annotations
+import calendar
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -17,6 +18,16 @@ from utils.errors import ConfigurationError, UpstreamServiceError
 from utils.url_processing import PreparedUrl, prepare_url
 
 logger = logging.getLogger(__name__)
+
+
+def _subtract_months(value: datetime, months: int) -> datetime:
+    year = value.year
+    month = value.month - months
+    while month <= 0:
+        year -= 1
+        month += 12
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
 
 
 @dataclass(frozen=True)
@@ -347,6 +358,53 @@ class ScanService:
         )
         return bool(response)
 
+    def cleanup_inactive_auth_users(self) -> dict:
+        if not self._config.get("SUPABASE_SERVICE_ROLE_KEY"):
+            raise ConfigurationError("SUPABASE_SERVICE_ROLE_KEY must be configured for inactive user cleanup")
+
+        cutoff = _subtract_months(datetime.now(UTC), 6)
+        auth_users = self._fetch_all_auth_users()
+        admin_user_ids = self._fetch_admin_user_ids()
+        stale_users: list[dict] = []
+
+        for user in auth_users:
+            serialized_user = self._serialize_auth_history_item(user)
+            user_id = str(serialized_user.get("id") or "").strip()
+            if not user_id:
+                continue
+
+            if user_id in admin_user_ids or serialized_user.get("is_admin"):
+                continue
+
+            activity_timestamp = self._get_auth_user_activity_timestamp(serialized_user)
+            if activity_timestamp is None or activity_timestamp > cutoff:
+                continue
+
+            stale_users.append(serialized_user)
+
+        deleted_users: list[dict] = []
+        failed_users: list[dict] = []
+
+        for user in stale_users:
+            user_id = str(user.get("id") or "").strip()
+            if not user_id:
+                continue
+
+            try:
+                self._delete_auth_user(user_id)
+            except UpstreamServiceError as exc:
+                failed_users.append({**user, "message": str(exc)})
+            else:
+                deleted_users.append(user)
+
+        return {
+            "cutoff_timestamp": cutoff.isoformat(),
+            "deleted_count": len(deleted_users),
+            "failed_count": len(failed_users),
+            "deleted_users": deleted_users,
+            "failed_users": failed_users,
+        }
+
     def _save_scan(
         self,
         user: AuthenticatedUser,
@@ -442,15 +500,7 @@ class ScanService:
         if not self._config.get("SUPABASE_SERVICE_ROLE_KEY"):
             raise ConfigurationError("SUPABASE_SERVICE_ROLE_KEY must be configured for admin auth history")
 
-        response = self._request(
-            "GET",
-            "/auth/v1/admin/users",
-            params={
-                "page": "1",
-                "per_page": str(min(self._config["ADMIN_ANALYTICS_FETCH_LIMIT"], 1000)),
-            },
-        )
-        users = response.get("users", []) if isinstance(response, dict) else []
+        users = self._fetch_all_auth_users()
         history = [self._serialize_auth_history_item(user) for user in users if user.get("email")]
         history.sort(
             key=lambda item: (
@@ -459,6 +509,67 @@ class ScanService:
             reverse=True,
         )
         return history
+
+    def _fetch_all_auth_users(self) -> list[dict]:
+        users: list[dict] = []
+        page = 1
+        per_page = min(int(self._config.get("ADMIN_ANALYTICS_FETCH_LIMIT", 1000)), 1000)
+
+        while True:
+            response = self._request(
+                "GET",
+                "/auth/v1/admin/users",
+                params={
+                    "page": str(page),
+                    "per_page": str(per_page),
+                },
+            )
+            batch = response.get("users", []) if isinstance(response, dict) else []
+            if not isinstance(batch, list) or not batch:
+                break
+
+            users.extend(user for user in batch if isinstance(user, dict))
+            if len(batch) < per_page:
+                break
+            page += 1
+
+        return users
+
+    def _fetch_admin_user_ids(self) -> set[str]:
+        admin_user_ids: set[str] = set()
+        limit = 1000
+        offset = 0
+
+        while True:
+            response = self._request(
+                "GET",
+                "/rest/v1/user_roles",
+                params={
+                    "select": "user_id",
+                    "role": "eq.admin",
+                    "limit": str(limit),
+                    "offset": str(offset),
+                },
+            )
+            rows = response if isinstance(response, list) else []
+            if not rows:
+                break
+
+            for row in rows:
+                if isinstance(row, dict) and row.get("user_id"):
+                    admin_user_ids.add(str(row["user_id"]))
+
+            if len(rows) < limit:
+                break
+            offset += len(rows)
+
+        return admin_user_ids
+
+    def _delete_auth_user(self, user_id: str) -> None:
+        self._request(
+            "DELETE",
+            f"/auth/v1/admin/users/{quote(user_id)}",
+        )
 
     def _request(
         self,
@@ -556,3 +667,30 @@ class ScanService:
             "providers": providers,
             "is_admin": "admin" in roles or "service_role" in roles,
         }
+
+    @staticmethod
+    def _parse_auth_timestamp(value: str | None) -> datetime | None:
+        if not value:
+            return None
+
+        normalized_value = value.replace("Z", "+00:00")
+        try:
+            parsed_value = datetime.fromisoformat(normalized_value)
+        except ValueError:
+            return None
+
+        if parsed_value.tzinfo is None:
+            parsed_value = parsed_value.replace(tzinfo=UTC)
+
+        return parsed_value.astimezone(UTC)
+
+    def _get_auth_user_activity_timestamp(self, user: dict) -> datetime | None:
+        last_sign_in = self._parse_auth_timestamp(
+            user.get("last_sign_in_timestamp") if isinstance(user, dict) else None
+        )
+        if last_sign_in is not None:
+            return last_sign_in
+
+        return self._parse_auth_timestamp(
+            user.get("signup_timestamp") if isinstance(user, dict) else None
+        )

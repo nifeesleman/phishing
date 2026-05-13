@@ -12,6 +12,7 @@ import {
 import { getSignupErrorMessage } from "@/lib/auth-errors";
 import { getSignupValidationError } from "@/lib/signup-validation";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
@@ -21,6 +22,7 @@ export function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [hasAcceptedLegal, setHasAcceptedLegal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmPasswordError, setConfirmPasswordError] = useState<string | null>(null);
@@ -35,7 +37,12 @@ export function SignupPage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const normalizedEmail = email.trim().toLowerCase();
-    const validationError = getSignupValidationError(normalizedEmail, password, confirmPassword);
+    const validationError = getSignupValidationError(
+      normalizedEmail,
+      password,
+      confirmPassword,
+      hasAcceptedLegal,
+    );
 
     setError(null);
     setConfirmPasswordError(null);
@@ -136,6 +143,37 @@ export function SignupPage() {
             {confirmPasswordError ? (
               <p className="mt-1 text-xs text-destructive">{confirmPasswordError}</p>
             ) : null}
+          </div>
+          <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
+            <div className="flex items-start gap-3">
+              <Checkbox
+                id="legal-consent"
+                checked={hasAcceptedLegal}
+                onCheckedChange={(checked) => {
+                  setHasAcceptedLegal(checked === true);
+                  setError(null);
+                }}
+                className="mt-0.5"
+              />
+              <div className="space-y-1.5">
+                <Label htmlFor="legal-consent" className="text-sm font-medium leading-6">
+                  I agree to the{" "}
+                  <Link to="/terms" className="text-primary hover:underline">
+                    Terms of Service
+                  </Link>{" "}
+                  and{" "}
+                  <Link to="/privacy" className="text-primary hover:underline">
+                    Privacy Policy
+                  </Link>
+                  .
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  By creating an account, you confirm that you understand how PhishGuard stores
+                  account data, scan history, and platform activity in a production-style
+                  environment.
+                </p>
+              </div>
+            </div>
           </div>
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
           <Button type="submit" disabled={loading} className="w-full shadow-glow">

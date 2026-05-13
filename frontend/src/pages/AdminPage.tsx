@@ -1,5 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
-import { Activity, AlertTriangle, Clock3, Shield, Sparkles, TrendingUp, Users } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Activity,
+  AlertTriangle,
+  Clock3,
+  Shield,
+  Sparkles,
+  TrendingUp,
+  UserRoundX,
+  Users,
+} from "lucide-react";
 import { Header } from "@/components/Header";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { Badge } from "@/components/ui/badge";
@@ -9,8 +18,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  fetchAdminInactiveCleanup,
   fetchAdminStats,
   fetchAdminUserHistory,
+  type AdminInactiveCleanupResponse,
   type AdminRange,
   type AdminStatsResponse,
   type AdminUserHistoryResponse,
@@ -59,6 +70,8 @@ function getPerdictClasses(result: "phishing" | "legit") {
 export function AdminPage() {
   const [range, setRange] = useState<AdminRange>("30d");
   const [adminData, setAdminData] = useState<AdminStatsResponse | null>(null);
+  const [cleanupSummary, setCleanupSummary] = useState<AdminInactiveCleanupResponse | null>(null);
+  const [cleanupError, setCleanupError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
@@ -67,22 +80,48 @@ export function AdminPage() {
   const [userHistoryById, setUserHistoryById] = useState<Record<string, AdminUserHistoryResponse>>(
     {},
   );
+  const shouldRunCleanupRef = useRef(true);
 
-  const loadAdminData = useCallback(async (nextRange: AdminRange) => {
-    setLoading(true);
-    setError(null);
+  const loadAdminData = useCallback(
+    async (nextRange: AdminRange, options?: { runCleanup?: boolean }) => {
+      setLoading(true);
+      setError(null);
 
-    try {
-      setAdminData(await fetchAdminStats(nextRange));
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Failed to load admin data.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      if (options?.runCleanup) {
+        setCleanupError(null);
+        setCleanupSummary(null);
+      }
+
+      try {
+        if (options?.runCleanup) {
+          try {
+            setCleanupSummary(await fetchAdminInactiveCleanup());
+          } catch (cleanupRequestError) {
+            setCleanupError(
+              cleanupRequestError instanceof Error
+                ? cleanupRequestError.message
+                : "Failed to clean up inactive users.",
+            );
+          }
+        }
+
+        const nextAdminData = await fetchAdminStats(nextRange);
+        setAdminData(nextAdminData);
+        setSelectedUserId((current) =>
+          current && nextAdminData.users.some((user) => user.id === current) ? current : null,
+        );
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : "Failed to load admin data.");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
-    void loadAdminData(range);
+    void loadAdminData(range, { runCleanup: shouldRunCleanupRef.current });
+    shouldRunCleanupRef.current = false;
   }, [loadAdminData, range]);
 
   const summary = adminData?.summary;
@@ -163,6 +202,10 @@ export function AdminPage() {
     },
   ];
 
+  const deletedUserEmails = cleanupSummary?.deletedUsers
+    .map((user) => user.email ?? user.id ?? "Unknown user")
+    .slice(0, 3);
+
   return (
     <div className="min-h-screen bg-background">
       <Header />
@@ -204,7 +247,7 @@ export function AdminPage() {
                         variant="ghost"
                         size="sm"
                         className="bg-background/50"
-                        onClick={() => void loadAdminData(range)}
+                        onClick={() => void loadAdminData(range, { runCleanup: true })}
                         disabled={loading}
                       >
                         {loading ? "Refreshing..." : "Refresh"}
@@ -232,6 +275,60 @@ export function AdminPage() {
                 </div>
               </CardContent>
             </Card>
+
+            {cleanupSummary || cleanupError ? (
+              <Card className="border-border/60 shadow-card">
+                <CardContent className="space-y-4 p-6">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <UserRoundX className="h-4 w-4 text-primary" />
+                        <p className="font-medium">Inactive account cleanup</p>
+                      </div>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        This page automatically removes non-admin accounts that have not signed in
+                        within 6 months, using the signup timestamp when a user never signed in.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant="secondary" className="rounded-full">
+                        {cleanupSummary?.deletedCount ?? 0} deleted
+                      </Badge>
+                      <Badge variant="outline" className="rounded-full">
+                        {cleanupSummary?.failedCount ?? 0} failed
+                      </Badge>
+                    </div>
+                  </div>
+                  {cleanupSummary?.cutoffTimestamp ? (
+                    <p className="text-xs text-muted-foreground">
+                      Cleanup cutoff: {formatTimestamp(cleanupSummary.cutoffTimestamp)}
+                    </p>
+                  ) : null}
+                  {deletedUserEmails && deletedUserEmails.length > 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Deleted: {deletedUserEmails.join(", ")}
+                      {cleanupSummary && cleanupSummary.deletedUsers.length > deletedUserEmails.length
+                        ? ` and ${cleanupSummary.deletedUsers.length - deletedUserEmails.length} more`
+                        : ""}
+                      .
+                    </p>
+                  ) : cleanupSummary && cleanupSummary.deletedCount === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No inactive accounts were eligible for deletion during this cleanup run.
+                    </p>
+                  ) : null}
+                  {cleanupSummary?.failedUsers.length ? (
+                    <p className="text-sm text-destructive">
+                      Failed deletions:{" "}
+                      {cleanupSummary.failedUsers
+                        .map((user) => `${user.email ?? user.id ?? "Unknown user"} (${user.message})`)
+                        .join(", ")}
+                    </p>
+                  ) : null}
+                  {cleanupError ? <p className="text-sm text-destructive">{cleanupError}</p> : null}
+                </CardContent>
+              </Card>
+            ) : null}
 
             {error ? (
               <Card className="border-destructive/40 bg-destructive/5">
@@ -393,9 +490,7 @@ export function AdminPage() {
                         {recentScans.length > 0 ? (
                           recentScans.map((scan) => (
                             <div
-                              key={
-                                scan.id ?? `${scan.url}-${scan.created_at ?? scan.userId ?? "scan"}`
-                              }
+                              key={scan.id ?? `${scan.url}-${scan.created_at ?? scan.userId ?? "scan"}`}
                               className="rounded-2xl border border-border/60 bg-card/50 p-4"
                             >
                               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -441,7 +536,10 @@ export function AdminPage() {
                       <Badge variant="secondary" className="rounded-full">
                         {users.length} accounts
                       </Badge>
-                      <span>Simple list for opening each user's scan history.</span>
+                      <span>
+                        Automatic cleanup uses signup and last sign-in timestamps to remove stale
+                        non-admin accounts after 6 months.
+                      </span>
                     </div>
 
                     <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
@@ -470,6 +568,9 @@ export function AdminPage() {
                                         {user.lastSignInTimestamp
                                           ? `Last sign-in ${formatTimestamp(user.lastSignInTimestamp)}`
                                           : "No sign-in activity yet"}
+                                      </p>
+                                      <p className="mt-1 text-xs text-muted-foreground">
+                                        Signed up {formatTimestamp(user.signupTimestamp)}
                                       </p>
                                     </div>
                                     <Badge
@@ -518,6 +619,21 @@ export function AdminPage() {
                                 <Badge className="rounded-full border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
                                   {selectedUserLegitCount} legit
                                 </Badge>
+                              </div>
+
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                <div className="rounded-xl bg-muted/40 p-3">
+                                  <p className="text-xs text-muted-foreground">Signed up</p>
+                                  <p className="mt-1 text-sm font-medium">
+                                    {formatTimestamp(selectedUser.signupTimestamp)}
+                                  </p>
+                                </div>
+                                <div className="rounded-xl bg-muted/40 p-3">
+                                  <p className="text-xs text-muted-foreground">Last sign-in</p>
+                                  <p className="mt-1 text-sm font-medium">
+                                    {formatTimestamp(selectedUser.lastSignInTimestamp)}
+                                  </p>
+                                </div>
                               </div>
 
                               <ScrollArea className="h-[420px] pr-4">
