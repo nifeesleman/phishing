@@ -37,3 +37,9 @@ class UrlProcessingTestCase(unittest.TestCase):
         prepared = prepare_url("http://192.168.1.1/verify", self.brand_keywords)
 
         self.assertEqual(prepared.hostname, "192.168.1.1")
+
+    def test_normalizes_www_subdomain_to_canonical_hostname(self):
+        prepared = prepare_url("https://www.phishing.com", self.brand_keywords)
+
+        self.assertEqual(prepared.hostname, "phishing.com")
+        self.assertEqual(prepared.normalized_url, "https://phishing.com/")

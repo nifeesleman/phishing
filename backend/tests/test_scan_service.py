@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import requests
 import threading
 import unittest
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from services.local_history_store import LocalHistoryStore
 from services.model_service import ModelPrediction
@@ -143,6 +145,33 @@ class _UnavailableScanService(ScanService):
 
 
 class ScanServiceTestCase(unittest.TestCase):
+    def test_site_availability_falls_back_to_www_variant(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = ScanService(
+                {},
+                _FakeModelService(),
+                LocalHistoryStore(str(Path(temp_dir) / "history.sqlite")),
+            )
+            response = Mock()
+            response.status_code = 200
+            response.close = Mock()
+
+            with patch("services.scan_service.requests.get") as mock_get:
+                mock_get.side_effect = [requests.RequestException("dns failed"), response]
+
+                availability = service._check_site_availability(
+                    type(
+                        "PreparedUrlStub",
+                        (),
+                        {"normalized_url": "https://phishing.com/"},
+                    )()
+                )
+
+            self.assertTrue(availability.is_available)
+            self.assertEqual(mock_get.call_count, 2)
+            self.assertEqual(mock_get.call_args_list[0].args[0], "https://phishing.com/")
+            self.assertEqual(mock_get.call_args_list[1].args[0], "https://www.phishing.com/")
+
     def test_scan_returns_prediction_when_persistence_fails(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             service = _FailingScanService(

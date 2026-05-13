@@ -65,6 +65,9 @@ def _normalize_hostname(hostname: str) -> str:
     if any(not _HOST_LABEL.fullmatch(label) for label in labels):
         raise ValidationError("URL hostname is invalid")
 
+    if len(labels) > 2 and labels[0] == "www":
+        return ".".join(labels[1:])
+
     return normalized
 
 

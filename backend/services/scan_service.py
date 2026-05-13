@@ -7,7 +7,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import requests
 
@@ -150,36 +150,63 @@ class ScanService:
             logger.warning(warning)
 
     def _check_site_availability(self, prepared_url: PreparedUrl) -> AvailabilityStatus:
-        try:
-            response = requests.get(
-                prepared_url.normalized_url,
-                allow_redirects=True,
-                timeout=float(self._config.get("SITE_AVAILABILITY_TIMEOUT_SECONDS", 5)),
-                headers={
-                    "User-Agent": (
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/124.0.0.0 Safari/537.36"
-                    )
-                },
-                stream=True,
-            )
-        except requests.RequestException as exc:
-            logger.info("Site availability check failed for %s: %s", prepared_url.normalized_url, exc)
-            return AvailabilityStatus(
-                is_available=False,
-                message="The website appears to be down or unreachable right now.",
-            )
-        finally:
-            if "response" in locals():
-                response.close()
+        alternate_url = self._build_alternate_availability_url(prepared_url.normalized_url)
+        candidates = [prepared_url.normalized_url]
+        if alternate_url and alternate_url not in candidates:
+            candidates.append(alternate_url)
 
-        if response.status_code >= 500:
-            return AvailabilityStatus(
-                is_available=False,
-                message="The website appears to be down right now.",
-            )
-        return AvailabilityStatus(is_available=True)
+        for candidate_url in candidates:
+            try:
+                response = requests.get(
+                    candidate_url,
+                    allow_redirects=True,
+                    timeout=float(self._config.get("SITE_AVAILABILITY_TIMEOUT_SECONDS", 5)),
+                    headers={
+                        "User-Agent": (
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/124.0.0.0 Safari/537.36"
+                        )
+                    },
+                    stream=True,
+                )
+                status_code = response.status_code
+            except requests.RequestException as exc:
+                logger.info("Site availability check failed for %s: %s", candidate_url, exc)
+                continue
+            finally:
+                if "response" in locals():
+                    response.close()
+                    del response
+
+            if status_code < 500:
+                return AvailabilityStatus(is_available=True)
+
+        return AvailabilityStatus(
+            is_available=False,
+            message="The website appears to be down or unreachable right now.",
+        )
+
+    @staticmethod
+    def _build_alternate_availability_url(normalized_url: str) -> str | None:
+        parsed = urlsplit(normalized_url)
+        hostname = parsed.hostname
+        if not hostname:
+            return None
+
+        if hostname.startswith("www."):
+            alternate_hostname = hostname[4:]
+        else:
+            alternate_hostname = f"www.{hostname}"
+
+        if alternate_hostname == hostname:
+            return None
+
+        netloc = alternate_hostname
+        if parsed.port:
+            netloc = f"{alternate_hostname}:{parsed.port}"
+
+        return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, ""))
 
     def get_history(
         self,
