@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentPasswordErrorMessage, getPasswordUpdateErrorMessage } from "@/lib/auth-errors";
+import { getPasswordValidationError } from "@/lib/password-validation";
 
 export function SettingsPage() {
   const { user, isAdmin } = useAuth();
@@ -33,13 +34,9 @@ export function SettingsPage() {
       return;
     }
 
-    if (newPassword.length < 6) {
-      setPasswordError("Password must be at least 6 characters.");
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      setPasswordError("Passwords do not match.");
+    const passwordValidationError = getPasswordValidationError(newPassword, confirmPassword);
+    if (passwordValidationError) {
+      setPasswordError(passwordValidationError.message);
       return;
     }
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   getCurrentPasswordErrorMessage,
   getLoginErrorMessage,
+  getPasswordResetRequestErrorMessage,
   getPasswordUpdateErrorMessage,
   getSignupErrorMessage,
 } from "@/lib/auth-errors";
@@ -28,6 +29,12 @@ describe("auth-errors", () => {
   it("maps duplicate signup errors to a clear message", () => {
     expect(getSignupErrorMessage({ message: "User already registered" })).toBe(
       "An account with this email already exists.",
+    );
+  });
+
+  it("maps password reset request rate limits to a clear message", () => {
+    expect(getPasswordResetRequestErrorMessage({ message: "Email rate limit exceeded" })).toBe(
+      "Please wait a moment before requesting another reset email.",
     );
   });
 

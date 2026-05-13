@@ -50,6 +50,25 @@ export function getSignupErrorMessage(error: AuthErrorLike | null | undefined) {
   return message || "Sign up failed. Please try again.";
 }
 
+export function getPasswordResetRequestErrorMessage(error: AuthErrorLike | null | undefined) {
+  const message = error?.message?.trim();
+  const normalizedMessage = message?.toLowerCase() ?? "";
+
+  if (normalizedMessage.includes("invalid email")) {
+    return "Please enter a valid email address.";
+  }
+
+  if (
+    normalizedMessage.includes("rate limit") ||
+    normalizedMessage.includes("too many requests") ||
+    normalizedMessage.includes("email rate limit exceeded")
+  ) {
+    return "Please wait a moment before requesting another reset email.";
+  }
+
+  return message || "Could not send the reset email. Please try again.";
+}
+
 export function getPasswordUpdateErrorMessage(error: AuthErrorLike | null | undefined) {
   const message = error?.message?.trim();
   const normalizedMessage = message?.toLowerCase() ?? "";
